@@ -22,18 +22,23 @@ const PORT = process.env.PORT || 3000;
 
 // Add request logging middleware
 app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - Origin: ${req.headers.origin}`);
     next();
 });
 
-// CORS Configuration - MUST BE FIRST
+// CORS Configuration - FIXED
 const corsOptions = {
     origin: [
-        'http://localhost:3001',
-        'http://127.0.0.1:3001',
+        // Local development
         'http://localhost:3000',
-        process.env.FRONTEND_URL
+        'http://localhost:3001', 
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:3001',
+        
+        // Vercel domains - ADD YOUR ACTUAL VERCEL URL HERE
+        'https://whats-app-archive-frontend.vercel.app/',
     ].filter(Boolean),
+    
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: [
         'Origin',
@@ -41,20 +46,43 @@ const corsOptions = {
         'Content-Type',
         'Accept',
         'Authorization',
-        'Cache-Control'
+        'Cache-Control',
+        'X-Access-Token'
     ],
     credentials: true,
     preflightContinue: false,
-    optionsSuccessStatus: 204
+    optionsSuccessStatus: 200
 };
 
 // Apply CORS first
 app.use(cors(corsOptions));
 
-// Handle preflight requests
+// Handle ALL preflight requests explicitly
 app.options('*', cors(corsOptions));
 
-// Body parsing middleware (before other middleware)
+// Add explicit CORS headers for debugging
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    
+    // Check if origin is allowed
+    if (corsOptions.origin.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+    }
+    
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS,PATCH');
+    res.header('Access-Control-Allow-Headers', 'Origin,X-Requested-With,Content-Type,Accept,Authorization,Cache-Control,X-Access-Token');
+    
+    // Handle preflight
+    if (req.method === 'OPTIONS') {
+        console.log(`[PREFLIGHT] ${req.path} from ${origin}`);
+        return res.status(200).end();
+    }
+    
+    next();
+});
+
+// Body parsing middleware (after CORS)
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -92,11 +120,7 @@ app.use('/api/auth/register', authLimiter);
 // Socket.IO with proper CORS
 const io = socketIo(server, {
     cors: {
-        origin: [
-            'http://localhost:3001',
-            'http://127.0.0.1:3001',
-            process.env.FRONTEND_URL
-        ].filter(Boolean),
+        origin: corsOptions.origin,
         methods: ["GET", "POST"],
         credentials: true
     },
@@ -114,17 +138,20 @@ app.get('/api/health', (req, res) => {
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         cors: 'enabled',
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || 'development',
+        allowedOrigins: corsOptions.origin
     });
 });
 
-// Test route for CORS
+// Test route for CORS - Enhanced
 app.get('/api/test', (req, res) => {
     res.json({
         message: 'Server working!',
         origin: req.headers.origin,
         method: req.method,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        corsEnabled: true,
+        headers: req.headers
     });
 });
 
@@ -138,8 +165,9 @@ app.use((err, req, res, next) => {
     console.error(`[Global Error Handler] ${req.method} ${req.path}:`, err);
 
     // Ensure CORS headers on errors
-    if (req.headers.origin) {
-        res.header('Access-Control-Allow-Origin', req.headers.origin);
+    const origin = req.headers.origin;
+    if (origin && corsOptions.origin.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
         res.header('Access-Control-Allow-Credentials', 'true');
     }
 
@@ -156,7 +184,15 @@ app.use((err, req, res, next) => {
 
 // 404 handler
 app.use('*', (req, res) => {
-    console.log(`[404] ${req.method} ${req.originalUrl}`);
+    console.log(`[404] ${req.method} ${req.originalUrl} from ${req.headers.origin}`);
+    
+    // Add CORS headers to 404 responses too
+    const origin = req.headers.origin;
+    if (origin && corsOptions.origin.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Access-Control-Allow-Credentials', 'true');
+    }
+    
     res.status(404).json({
         error: 'Route not found',
         path: req.originalUrl,
@@ -283,7 +319,8 @@ const startServer = async () => {
 🌐 API Base URL: http://localhost:${PORT}/api
 💾 Database: Connected
 🔌 WebSocket: Ready
-🌍 CORS: Enabled for ${process.env.FRONTEND_URL}
+🌍 CORS: Enabled for origins:
+${corsOptions.origin.map(origin => `   - ${origin}`).join('\n')}
 ⚡ Rate Limiting: ${process.env.NODE_ENV === 'production' ? 'Strict' : 'Lenient'}
         `);
     });
