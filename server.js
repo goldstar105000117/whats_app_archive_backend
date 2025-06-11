@@ -283,7 +283,7 @@ const startServer = async () => {
 🌐 API Base URL: http://localhost:${PORT}/api
 💾 Database: Connected
 🔌 WebSocket: Ready
-🌍 CORS: Enabled for http://localhost:3001
+🌍 CORS: Enabled for ${process.env.FRONTEND_URL}
 ⚡ Rate Limiting: ${process.env.NODE_ENV === 'production' ? 'Strict' : 'Lenient'}
         `);
     });
