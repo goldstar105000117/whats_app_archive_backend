@@ -36,7 +36,7 @@ const corsOptions = {
         'http://127.0.0.1:3001',
         
         // Vercel domains - ADD YOUR ACTUAL VERCEL URL HERE
-        'https://whats-app-archive-frontend.vercel.app/',
+        'https://whats-app-archive-frontend.vercel.app',
     ].filter(Boolean),
     
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
