@@ -8,22 +8,59 @@ class WhatsAppService {
     constructor() {
         this.clients = new Map(); // userId -> client instance
         this.qrCodes = new Map(); // userId -> qrCode
+        this.initializationPromises = new Map();
     }
 
     async initializeClient(userId, io) {
         try {
+            console.log(`[initializeClient] Starting initialization for user ${userId}`);
+
+            // Check if initialization is already in progress
+            if (this.initializationPromises.has(userId)) {
+                console.log(`[initializeClient] Initialization already in progress for user ${userId}`);
+                return await this.initializationPromises.get(userId);
+            }
+
             // Check if client already exists and is connected
             if (this.clients.has(userId)) {
                 const existingClient = this.clients.get(userId);
                 if (existingClient.info) {
-                    console.log(`Client already connected for user ${userId}`);
+                    console.log(`[initializeClient] Client already connected for user ${userId}`);
                     return { success: true, message: 'Client already connected', connected: true };
+                } else {
+                    console.log(`[initializeClient] Existing client not ready, removing for user ${userId}`);
+                    // Clean up non-ready client
+                    try {
+                        await existingClient.destroy();
+                    } catch (e) {
+                        console.log(`[initializeClient] Error destroying old client: ${e.message}`);
+                    }
+                    this.clients.delete(userId);
                 }
             }
 
-            // Get existing session data from database
-            const sessionData = await WhatsAppSession.findByUserId(userId);
-            console.log(`Session data for user ${userId}:`, sessionData ? 'Found' : 'Not found');
+            // Create initialization promise
+            const initPromise = this._performInitialization(userId, io);
+            this.initializationPromises.set(userId, initPromise);
+
+            try {
+                const result = await initPromise;
+                return result;
+            } finally {
+                // Clean up the promise tracker
+                this.initializationPromises.delete(userId);
+            }
+
+        } catch (error) {
+            console.error(`[initializeClient] Error initializing client for user ${userId}:`, error);
+            this.initializationPromises.delete(userId);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async _performInitialization(userId, io) {
+        try {
+            console.log(`[_performInitialization] Creating new client for user ${userId}`);
 
             const client = new Client({
                 authStrategy: new LocalAuth({
@@ -48,23 +85,62 @@ class WhatsAppService {
             // Set up event handlers
             this.setupClientEvents(client, userId, io);
 
-            // Store client
+            // Store client immediately
             this.clients.set(userId, client);
 
-            // Initialize client
-            await client.initialize();
+            // Initialize client with timeout
+            console.log(`[_performInitialization] Starting client.initialize() for user ${userId}`);
 
-            return { success: true, message: 'Client initialization started', connected: false };
+            // Create a promise that resolves when client is ready or rejects on timeout
+            const initializationResult = await Promise.race([
+                new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Client initialization timed out'));
+                    }, 50000);
+
+                    // Listen for ready or auth_failure events
+                    client.once('ready', () => {
+                        clearTimeout(timeout);
+                        resolve({ success: true, message: 'Client connected', connected: true });
+                    });
+
+                    client.once('auth_failure', (msg) => {
+                        clearTimeout(timeout);
+                        resolve({ success: false, error: `Authentication failed: ${msg}` });
+                    });
+
+                    // Start initialization
+                    client.initialize().catch((err) => {
+                        clearTimeout(timeout);
+                        reject(err);
+                    });
+                })
+            ]);
+
+            return initializationResult;
+
         } catch (error) {
-            console.error(`Error initializing client for user ${userId}:`, error);
-            return { success: false, error: error.message };
+            console.error(`[_performInitialization] Error during initialization for user ${userId}:`, error);
+
+            // Clean up on error
+            if (this.clients.has(userId)) {
+                const client = this.clients.get(userId);
+                try {
+                    await client.destroy();
+                } catch (e) {
+                    console.log(`[_performInitialization] Error destroying client on error: ${e.message}`);
+                }
+                this.clients.delete(userId);
+            }
+
+            throw error;
         }
     }
 
     setupClientEvents(client, userId, io) {
         client.on('qr', async (qr) => {
             try {
-                console.log(`QR Code generated for user ${userId}`);
+                console.log(`[setupClientEvents] QR Code generated for user ${userId}`);
 
                 // Generate QR code as data URL
                 const qrDataURL = await QRCode.toDataURL(qr);
@@ -73,86 +149,180 @@ class WhatsAppService {
                 this.qrCodes.set(userId, qrDataURL);
 
                 // Emit to specific user
-                io.to(`user_${userId}`).emit('qr', { qr: qrDataURL });
+                if (io) {
+                    io.to(`user_${userId}`).emit('qr', { qr: qrDataURL });
+                }
 
                 // Create or update session record (not active yet)
                 await WhatsAppSession.create(userId);
             } catch (error) {
-                console.error('Error generating QR code:', error);
+                console.error(`[setupClientEvents] Error generating QR code for user ${userId}:`, error);
             }
         });
 
         client.on('ready', async () => {
             try {
-                console.log(`WhatsApp client ready for user ${userId}`);
+                console.log(`[setupClientEvents] WhatsApp client ready for user ${userId}`);
 
                 const clientInfo = client.info;
-                console.log(`Connected as: ${clientInfo.pushname} (${clientInfo.wid.user})`);
+                console.log(`[setupClientEvents] Connected as: ${clientInfo.pushname} (${clientInfo.wid.user})`);
 
-                // Save session data to database
-                const sessionData = {
-                    clientId: `user_${userId}`,
-                    phoneNumber: clientInfo.wid.user,
-                    pushName: clientInfo.pushname,
-                    isConnected: true
-                };
+                // IMMEDIATE: Emit ready event to frontend first (don't wait for database)
+                if (io) {
+                    io.to(`user_${userId}`).emit('ready', {
+                        phoneNumber: clientInfo.wid.user,
+                        pushName: clientInfo.pushname
+                    });
+                    console.log(`[setupClientEvents] Ready event emitted to frontend for user ${userId}`);
+                }
 
-                // Update session in database with full session data
-                await WhatsAppSession.updateSessionData(userId, JSON.stringify(sessionData));
-                await WhatsAppSession.setActive(userId, true);
-                await WhatsAppSession.updatePhoneNumber(userId, clientInfo.wid.user);
+                // IMMEDIATE: Remove QR code since connection is successful
+                this.qrCodes.delete(userId);
+                console.log(`[setupClientEvents] QR code removed for user ${userId}`);
 
-                // Emit ready event
-                io.to(`user_${userId}`).emit('ready', {
-                    phoneNumber: clientInfo.wid.user,
-                    pushName: clientInfo.pushname
+                // BACKGROUND: Handle database updates asynchronously (don't block)
+                setImmediate(async () => {
+                    try {
+                        console.log(`[setupClientEvents] Starting background database updates for user ${userId}`);
+
+                        const sessionData = {
+                            clientId: `user_${userId}`,
+                            phoneNumber: clientInfo.wid.user,
+                            pushName: clientInfo.pushname,
+                            isConnected: true
+                        };
+
+                        // Use Promise.allSettled to handle each DB operation independently
+                        const dbOperations = [
+                            // Operation 1: Update session data
+                            WhatsAppSession.updateSessionData(userId, JSON.stringify(sessionData))
+                                .catch(err => {
+                                    console.error(`[setupClientEvents] Failed to update session data for user ${userId}:`, err.message);
+                                    return { error: 'session_data_failed' };
+                                }),
+
+                            // Operation 2: Set active status
+                            WhatsAppSession.setActive(userId, true)
+                                .catch(err => {
+                                    console.error(`[setupClientEvents] Failed to set active for user ${userId}:`, err.message);
+                                    return { error: 'set_active_failed' };
+                                }),
+
+                            // Operation 3: Update phone number
+                            WhatsAppSession.updatePhoneNumber(userId, clientInfo.wid.user)
+                                .catch(err => {
+                                    console.error(`[setupClientEvents] Failed to update phone number for user ${userId}:`, err.message);
+                                    return { error: 'phone_update_failed' };
+                                })
+                        ];
+
+                        // Execute all operations with timeout
+                        const results = await Promise.race([
+                            Promise.allSettled(dbOperations),
+                            new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error('Database operations timeout')), 10000)
+                            )
+                        ]);
+
+                        console.log(`[setupClientEvents] Background database updates completed for user ${userId}`);
+
+                        // Log results but don't fail if some operations failed
+                        results.forEach((result, index) => {
+                            if (result.status === 'fulfilled') {
+                                console.log(`[setupClientEvents] DB operation ${index + 1} successful for user ${userId}`);
+                            } else {
+                                console.error(`[setupClientEvents] DB operation ${index + 1} failed for user ${userId}:`, result.reason?.message);
+                            }
+                        });
+
+                        // Emit database update completion (optional)
+                        if (io) {
+                            io.to(`user_${userId}`).emit('session_saved', {
+                                success: true,
+                                phoneNumber: clientInfo.wid.user
+                            });
+                        }
+
+                    } catch (backgroundError) {
+                        console.error(`[setupClientEvents] Background database operations failed for user ${userId}:`, backgroundError.message);
+
+                        // Even if database fails, client is still connected
+                        if (io) {
+                            io.to(`user_${userId}`).emit('session_saved', {
+                                success: false,
+                                error: 'Database update failed but client is connected',
+                                phoneNumber: clientInfo.wid.user
+                            });
+                        }
+                    }
                 });
 
-                // Remove QR code
-                this.qrCodes.delete(userId);
             } catch (error) {
-                console.error('Error in ready event:', error);
+                console.error(`[setupClientEvents] Critical error in ready event for user ${userId}:`, error);
+
+                // Even on error, try to emit ready event
+                if (io) {
+                    io.to(`user_${userId}`).emit('ready', {
+                        phoneNumber: 'unknown',
+                        pushName: 'unknown',
+                        error: 'Partial connection - some features may not work'
+                    });
+                }
             }
         });
 
         client.on('authenticated', async (session) => {
             try {
-                console.log(`Client authenticated for user ${userId}`);
+                console.log(`[setupClientEvents] Client authenticated for user ${userId}`);
 
                 // Save the session data to database
                 await WhatsAppSession.updateSessionData(userId, JSON.stringify(session));
 
-                io.to(`user_${userId}`).emit('authenticated');
+                if (io) {
+                    io.to(`user_${userId}`).emit('authenticated');
+                }
             } catch (error) {
-                console.error('Error saving session data:', error);
+                console.error(`[setupClientEvents] Error saving session data for user ${userId}:`, error);
             }
         });
 
         client.on('auth_failure', async (msg) => {
-            console.error(`Authentication failed for user ${userId}:`, msg);
-            await WhatsAppSession.setActive(userId, false);
-            io.to(`user_${userId}`).emit('auth_failure', { message: msg });
+            console.error(`[setupClientEvents] Authentication failed for user ${userId}:`, msg);
+            try {
+                await WhatsAppSession.setActive(userId, false);
+                if (io) {
+                    io.to(`user_${userId}`).emit('auth_failure', { message: msg });
+                }
+            } catch (error) {
+                console.error(`[setupClientEvents] Error handling auth_failure for user ${userId}:`, error);
+            }
         });
 
         client.on('disconnected', async (reason) => {
-            console.log(`Client disconnected for user ${userId}:`, reason);
-            await WhatsAppSession.setActive(userId, false);
-            this.clients.delete(userId);
-            io.to(`user_${userId}`).emit('disconnected', { reason });
+            console.log(`[setupClientEvents] Client disconnected for user ${userId}:`, reason);
+            try {
+                await WhatsAppSession.setActive(userId, false);
+                this.clients.delete(userId);
+                if (io) {
+                    io.to(`user_${userId}`).emit('disconnected', { reason });
+                }
+            } catch (error) {
+                console.error(`[setupClientEvents] Error handling disconnection for user ${userId}:`, error);
+            }
         });
 
         client.on('message', async (message) => {
             // Handle incoming messages with real-time notifications
             try {
-                console.log(`[WhatsApp] New message received for user ${userId}`);
-                console.log(`[WhatsApp] From: ${message.from}, To: ${message.to}, FromMe: ${message.fromMe}`);
+                console.log(`[setupClientEvents] New message received for user ${userId}`);
+                console.log(`[setupClientEvents] From: ${message.from}, To: ${message.to}, FromMe: ${message.fromMe}`);
 
                 const chat = await message.getChat();
                 await this.saveMessage(userId, chat, message);
 
                 // Only send notifications for messages NOT from the current user
-                if (!message.fromMe) {
-                    console.log(`[WhatsApp] Processing incoming message notification for user ${userId}`);
+                if (!message.fromMe && io) {
+                    console.log(`[setupClientEvents] Processing incoming message notification for user ${userId}`);
 
                     // Get sender info
                     const contact = await message.getContact();
@@ -187,7 +357,7 @@ class WhatsAppService {
                         const profilePicUrl = await contact.getProfilePicUrl();
                         notificationData.sender.profilePicUrl = profilePicUrl;
                     } catch (picError) {
-                        console.log(`[WhatsApp] Could not get profile picture: ${picError.message}`);
+                        console.log(`[setupClientEvents] Could not get profile picture: ${picError.message}`);
                     }
 
                     // Emit real-time notification to the specific user
@@ -201,11 +371,11 @@ class WhatsAppService {
                         sender: notificationData.sender
                     });
 
-                    console.log(`[WhatsApp] Notification sent for message from ${senderName} to user ${userId}`);
+                    console.log(`[setupClientEvents] Notification sent for message from ${senderName} to user ${userId}`);
                 }
 
             } catch (error) {
-                console.error(`[WhatsApp] Error handling incoming message for user ${userId}:`, error);
+                console.error(`[setupClientEvents] Error handling incoming message for user ${userId}:`, error);
             }
         });
     }
@@ -214,37 +384,49 @@ class WhatsAppService {
     async checkExistingSession(userId, io) {
         try {
             console.log(`[checkExistingSession] Checking existing session for user ${userId}`);
+
             const sessionData = await WhatsAppSession.findByUserId(userId);
             console.log(`[checkExistingSession] Session data found:`, sessionData ? 'Yes' : 'No');
 
-            if (sessionData) {
-                console.log(`[checkExistingSession] Session details - Active: ${sessionData.is_active}, Phone: ${sessionData.phone_number}`);
+            if (!sessionData) {
+                return {
+                    hasSession: false,
+                    isActive: false,
+                    connected: false,
+                    phoneNumber: null,
+                    lastUsed: null
+                };
+            }
 
-                if (sessionData.is_active) {
-                    console.log(`[checkExistingSession] Found active session for user ${userId}, checking client status...`);
+            console.log(`[checkExistingSession] Session details - Active: ${sessionData.is_active}, Phone: ${sessionData.phone_number}`);
 
-                    // Check if client is already running
-                    if (this.clients.has(userId)) {
-                        const existingClient = this.clients.get(userId);
-                        console.log(`[checkExistingSession] Client exists, checking if ready...`);
+            if (sessionData.is_active) {
+                console.log(`[checkExistingSession] Found active session for user ${userId}, checking client status...`);
 
-                        if (existingClient.info) {
-                            console.log(`[checkExistingSession] Client already connected for user ${userId}`);
-                            return {
-                                hasSession: true,
-                                isActive: true,
-                                connected: true,
-                                phoneNumber: sessionData.phone_number,
-                                lastUsed: sessionData.last_used
-                            };
-                        } else {
-                            console.log(`[checkExistingSession] Client exists but not ready, removing and reinitializing...`);
-                            this.clients.delete(userId);
-                        }
+                // Check if client is already running
+                if (this.clients.has(userId)) {
+                    const existingClient = this.clients.get(userId);
+                    console.log(`[checkExistingSession] Client exists, checking if ready...`);
+
+                    if (existingClient.info) {
+                        console.log(`[checkExistingSession] Client already connected for user ${userId}`);
+                        return {
+                            hasSession: true,
+                            isActive: true,
+                            connected: true,
+                            phoneNumber: sessionData.phone_number,
+                            lastUsed: sessionData.last_used
+                        };
+                    } else {
+                        console.log(`[checkExistingSession] Client exists but not ready, removing and reinitializing...`);
+                        this.clients.delete(userId);
                     }
+                }
 
-                    // Try to initialize with existing session
-                    console.log(`[checkExistingSession] Attempting to restore WhatsApp client for user ${userId}...`);
+                // Try to initialize with existing session
+                console.log(`[checkExistingSession] Attempting to restore WhatsApp client for user ${userId}...`);
+
+                try {
                     const result = await this.initializeClient(userId, io);
                     console.log(`[checkExistingSession] Initialization result:`, result);
 
@@ -262,7 +444,28 @@ class WhatsAppService {
                             phoneNumber: sessionData.phone_number,
                             lastUsed: sessionData.last_used
                         };
+                    } else {
+                        // Initialization failed, mark session as inactive
+                        await WhatsAppSession.setActive(userId, false);
+                        return {
+                            hasSession: true,
+                            isActive: false,
+                            connected: false,
+                            phoneNumber: sessionData.phone_number,
+                            lastUsed: sessionData.last_used
+                        };
                     }
+                } catch (initError) {
+                    console.error(`[checkExistingSession] Error during initialization:`, initError.message);
+                    // Mark session as inactive on error
+                    await WhatsAppSession.setActive(userId, false);
+                    return {
+                        hasSession: true,
+                        isActive: false,
+                        connected: false,
+                        phoneNumber: sessionData.phone_number,
+                        lastUsed: sessionData.last_used
+                    };
                 }
             }
 
@@ -439,11 +642,11 @@ class WhatsAppService {
             const formattedMessage = this.formatMessage(message);
             await Message.create(userId, chatRecord.id, formattedMessage);
 
-            // // Update last message time
-            // await Chat.updateLastMessageTime(chatRecord.id, message.timestamp * 1000);
+            // Update last message time
+            await Chat.updateLastMessageTime(chatRecord.id, message.timestamp * 1000);
 
         } catch (error) {
-            console.error('Error saving message:', error);
+            console.error(`[saveMessage] Error saving message for user ${userId}:`, error);
         }
     }
 
@@ -460,32 +663,44 @@ class WhatsAppService {
         try {
             const client = this.clients.get(userId);
             if (client) {
-                console.log(`Disconnecting WhatsApp client for user ${userId}`);
+                console.log(`[disconnectClient] Disconnecting WhatsApp client for user ${userId}`);
                 await client.destroy();
                 this.clients.delete(userId);
             }
 
             await WhatsAppSession.setActive(userId, false);
             this.qrCodes.delete(userId);
+            this.initializationPromises.delete(userId); // Clean up any pending initializations
 
             return { success: true };
         } catch (error) {
-            console.error(`Error disconnecting client for user ${userId}:`, error);
+            console.error(`[disconnectClient] Error disconnecting client for user ${userId}:`, error);
             return { success: false, error: error.message };
         }
     }
 
     async getClientStatus(userId) {
-        const client = this.clients.get(userId);
-        const session = await WhatsAppSession.findByUserId(userId);
+        try {
+            const client = this.clients.get(userId);
+            const session = await WhatsAppSession.findByUserId(userId);
 
-        return {
-            connected: !!(client && client.info),
-            hasSession: !!session,
-            isActive: session?.is_active || false,
-            phoneNumber: session?.phone_number,
-            lastUsed: session?.last_used
-        };
+            return {
+                connected: !!(client && client.info),
+                hasSession: !!session,
+                isActive: session?.is_active || false,
+                phoneNumber: session?.phone_number,
+                lastUsed: session?.last_used
+            };
+        } catch (error) {
+            console.error(`[getClientStatus] Error getting status for user ${userId}:`, error);
+            return {
+                connected: false,
+                hasSession: false,
+                isActive: false,
+                phoneNumber: null,
+                lastUsed: null
+            };
+        }
     }
 }
 

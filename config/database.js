@@ -11,9 +11,6 @@ const pool = mysql.createPool({
 
     // Connection pool settings
     connectionLimit: 10,
-    acquireTimeout: 60000,
-    timeout: 60000,
-    reconnect: true,
 
     // MySQL specific settings
     charset: 'utf8mb4',
@@ -72,31 +69,6 @@ const connectWithRetry = async (retries = 5) => {
         }
     }
 };
-
-// Pool monitoring
-const monitorPool = () => {
-    setInterval(async () => {
-        try {
-            const connection = await pool.getConnection();
-            const [rows] = await connection.execute(`
-                SELECT 
-                    VARIABLE_VALUE as current_connections
-                FROM information_schema.GLOBAL_STATUS 
-                WHERE VARIABLE_NAME = 'Threads_connected'
-            `);
-            connection.release();
-
-            console.log(`📊 Current MySQL connections: ${rows[0]?.current_connections || 'unknown'}`);
-        } catch (monitorError) {
-            console.error('❌ Error monitoring pool:', monitorError.message);
-        }
-    }, 30000); // Every 30 seconds
-};
-
-// Start monitoring in development
-if (process.env.NODE_ENV !== 'production') {
-    monitorPool();
-}
 
 // Test connection on startup
 connectWithRetry().then(success => {

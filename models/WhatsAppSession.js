@@ -1,5 +1,14 @@
 const { query } = require('../config/database');
 
+const withDBTimeout = (promise, timeoutMs = 5000) => {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Database operation timed out')), timeoutMs)
+    )
+  ]);
+};
+
 class WhatsAppSession {
   static async create(userId, sessionData = null, phoneNumber = null) {
     try {
@@ -14,11 +23,11 @@ class WhatsAppSession {
           updated_at = CURRENT_TIMESTAMP
       `;
 
-      await query(queryText, [userId, sessionData, phoneNumber]);
+      await withDBTimeout(query(queryText, [userId, sessionData, phoneNumber]));
 
       // Fetch the created/updated record
       const selectQuery = 'SELECT * FROM whatsapp_sessions WHERE user_id = ?';
-      const result = await query(selectQuery, [userId]);
+      const result = await withDBTimeout(query(selectQuery, [userId]));
 
       console.log(`[WhatsAppSession] Session created/updated for user ${userId}`);
       return result.rows[0];
@@ -33,7 +42,7 @@ class WhatsAppSession {
       console.log(`[WhatsAppSession] Finding session for user ${userId}`);
 
       const queryText = 'SELECT * FROM whatsapp_sessions WHERE user_id = ?';
-      const result = await query(queryText, [userId]);
+      const result = await withDBTimeout(query(queryText, [userId]), 3000); // Shorter timeout for reads
 
       const session = result.rows[0];
       console.log(`[WhatsAppSession] Session found for user ${userId}: ${session ? 'Yes' : 'No'}`);
@@ -41,6 +50,12 @@ class WhatsAppSession {
       return session;
     } catch (error) {
       console.error(`[WhatsAppSession] Error finding session for user ${userId}:`, error);
+
+      // If it's a timeout, throw a more specific error
+      if (error.message === 'Database operation timed out') {
+        throw new Error('Database query timed out - please try again');
+      }
+
       throw error;
     }
   }
@@ -49,16 +64,21 @@ class WhatsAppSession {
     try {
       console.log(`[WhatsAppSession] Updating session data for user ${userId}`);
 
+      if (!sessionData) {
+        console.error('[WhatsAppSession] Invalid session data provided');
+        return;
+      }
+
       const queryText = `
         UPDATE whatsapp_sessions 
         SET session_data = ?, updated_at = CURRENT_TIMESTAMP
         WHERE user_id = ?
       `;
-      await query(queryText, [sessionData, userId]);
+      await withDBTimeout(query(queryText, [sessionData, userId]));
 
       // Fetch the updated record
       const selectQuery = 'SELECT * FROM whatsapp_sessions WHERE user_id = ?';
-      const result = await query(selectQuery, [userId]);
+      const result = await withDBTimeout(query(selectQuery, [userId]));
 
       console.log(`[WhatsAppSession] Session data updated for user ${userId}`);
       return result.rows[0];
@@ -79,11 +99,11 @@ class WhatsAppSession {
             updated_at = CURRENT_TIMESTAMP
         WHERE user_id = ?
       `;
-      await query(queryText, [isActive, isActive, userId]);
+      await withDBTimeout(query(queryText, [isActive, isActive, userId]));
 
       // Fetch the updated record
       const selectQuery = 'SELECT * FROM whatsapp_sessions WHERE user_id = ?';
-      const result = await query(selectQuery, [userId]);
+      const result = await withDBTimeout(query(selectQuery, [userId]));
 
       console.log(`[WhatsAppSession] Active status updated for user ${userId}`);
       return result.rows[0];
@@ -102,11 +122,11 @@ class WhatsAppSession {
         SET phone_number = ?, updated_at = CURRENT_TIMESTAMP
         WHERE user_id = ?
       `;
-      await query(queryText, [phoneNumber, userId]);
+      await withDBTimeout(query(queryText, [phoneNumber, userId]));
 
       // Fetch the updated record
       const selectQuery = 'SELECT * FROM whatsapp_sessions WHERE user_id = ?';
-      const result = await query(selectQuery, [userId]);
+      const result = await withDBTimeout(query(selectQuery, [userId]));
 
       console.log(`[WhatsAppSession] Phone number updated for user ${userId}`);
       return result.rows[0];
@@ -122,12 +142,12 @@ class WhatsAppSession {
 
       // First fetch the record to return it
       const selectQuery = 'SELECT * FROM whatsapp_sessions WHERE user_id = ?';
-      const selectResult = await query(selectQuery, [userId]);
+      const selectResult = await withDBTimeout(query(selectQuery, [userId]));
       const session = selectResult.rows[0];
 
       // Then delete it
       const deleteQuery = 'DELETE FROM whatsapp_sessions WHERE user_id = ?';
-      await query(deleteQuery, [userId]);
+      await withDBTimeout(query(deleteQuery, [userId]));
 
       console.log(`[WhatsAppSession] Session deleted for user ${userId}`);
       return session;
@@ -148,7 +168,7 @@ class WhatsAppSession {
         WHERE ws.is_active = true
         ORDER BY ws.last_used DESC
       `;
-      const result = await query(queryText);
+      const result = await withDBTimeout(query(queryText), 10000); // Longer timeout for complex query
 
       console.log(`[WhatsAppSession] Found ${result.rows.length} active sessions`);
       return result.rows;
@@ -168,7 +188,7 @@ class WhatsAppSession {
         WHERE is_active = false 
         AND updated_at < DATE_SUB(NOW(), INTERVAL ? DAY)
       `;
-      const selectResult = await query(selectQuery, [olderThanDays]);
+      const selectResult = await withDBTimeout(query(selectQuery, [olderThanDays]));
 
       // Then delete them
       const deleteQuery = `
@@ -176,7 +196,7 @@ class WhatsAppSession {
         WHERE is_active = false 
         AND updated_at < DATE_SUB(NOW(), INTERVAL ? DAY)
       `;
-      await query(deleteQuery, [olderThanDays]);
+      await withDBTimeout(query(deleteQuery, [olderThanDays]));
 
       console.log(`[WhatsAppSession] Cleaned up ${selectResult.rows.length} inactive sessions`);
       return selectResult.rows;
@@ -198,7 +218,7 @@ class WhatsAppSession {
           AVG(TIMESTAMPDIFF(HOUR, last_used, NOW())) as avg_hours_since_last_use
         FROM whatsapp_sessions
       `;
-      const result = await query(queryText);
+      const result = await withDBTimeout(query(queryText), 10000);
 
       console.log(`[WhatsAppSession] Session statistics retrieved`);
       return result.rows[0];
