@@ -511,14 +511,31 @@ class WhatsAppService {
                 try {
                     console.log(`[fetchAndSaveMessages] Processing chat ${i + 1}/${chats.length}: ${chat.name || chat.id.user}`);
 
-                    // Save or update chat info first
-                    const chatRecord = await Chat.create(userId, {
+                    const chatData = {
                         chatId: chat.id._serialized,
                         chatName: chat.name || chat.id.user,
                         chatType: chat.isGroup ? 'group' : 'individual',
                         isGroup: chat.isGroup,
-                        participantCount: chat.isGroup ? chat.participants.length : 2
-                    });
+                        participantCount: chat.isGroup ? chat.participants?.length || 0 : 2
+                    };
+
+                    if (chat.isGroup && chat.participants) {
+                        console.log(`[fetchAndSaveMessages] Processing ${chat.participants.length} participants for group: ${chat.name}`);
+                        
+                        // Format participants data
+                        chatData.participants = chat.participants.map(participant => {
+                            return {
+                                id: participant.id._serialized,
+                                isAdmin: participant.isAdmin || false,
+                                isSuperAdmin: participant.isSuperAdmin || false,
+                                number: participant.id.user
+                            };
+                        });
+
+                        console.log(`[fetchAndSaveMessages] Sample participant data:`, chatData.participants[0]);
+                    }
+                    // Save or update chat info first
+                    const chatRecord = await Chat.create(userId, chatData);
 
                     // Fetch messages with proper error handling
                     const fetchOptions = limit ? { limit } : {};
@@ -562,6 +579,8 @@ class WhatsAppService {
                         chatId: chat.id._serialized,
                         chatName: chat.name || chat.id.user,
                         isGroup: chat.isGroup,
+                        participantCount: chatData.participantCount,
+                        participantsStored: chat.isGroup ? (chatData.participants?.length || 0) : 0,
                         messageCount: messages.length,
                         status: 'success'
                     });
@@ -629,14 +648,29 @@ class WhatsAppService {
 
     async saveMessage(userId, chat, message) {
         try {
-            // Ensure chat exists
-            const chatRecord = await Chat.create(userId, {
+            const chatData = {
                 chatId: chat.id._serialized,
                 chatName: chat.name || chat.id.user,
                 chatType: chat.isGroup ? 'group' : 'individual',
                 isGroup: chat.isGroup,
-                participantCount: chat.isGroup ? chat.participants.length : 2
-            });
+                participantCount: chat.isGroup ? chat.participants?.length || 0 : 2
+            };
+
+            if (chat.isGroup && chat.participants) {
+                chatData.participants = chat.participants.map(participant => {
+                    return {
+                        id: participant.id._serialized,
+                        isAdmin: participant.isAdmin || false,
+                        isSuperAdmin: participant.isSuperAdmin || false,
+                        number: participant.id.user,
+                        pushname: participant.pushname || null,
+                        shortName: participant.shortName || null
+                    };
+                });
+            }
+
+            // Ensure chat exists
+            const chatRecord = await Chat.create(userId, chatData);
 
             // Save message
             const formattedMessage = this.formatMessage(message);

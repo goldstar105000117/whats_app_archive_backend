@@ -15,7 +15,7 @@ router.use(auth);
 router.get('/check-session', whatsappController.checkSession);
 router.post('/initialize', whatsappController.initializeWhatsApp);
 router.get('/qr', whatsappController.getQRCode);
-router.post('/fetch-messages', whatsappController.fetchMessages); // 5 min timeout for fetching
+router.post('/fetch-messages', whatsappController.fetchMessages);
 router.get('/status', whatsappController.getStatus);
 router.post('/disconnect', whatsappController.disconnect);
 router.delete('/session', whatsappController.deleteSession);

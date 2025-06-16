@@ -3,39 +3,73 @@ const { query } = require('../config/database');
 class Chat {
     static async create(userId, chatData) {
         try {
-            const {
-                chatId,
-                chatName,
-                chatType = 'individual',
-                isGroup = false,
-                participantCount = 0
-            } = chatData;
+            console.log(`[Chat] Creating/updating chat for user ${userId}:`, chatData.chatId);
 
-            console.log(`[Chat.create] Creating/updating chat ${chatName} for user ${userId}`);
+            // Extract participants and format them properly
+            let participantsJson = null;
+            let participantCount = 0;
+
+            if (chatData.participants && Array.isArray(chatData.participants)) {
+                // Format participants data for JSON storage
+                const formattedParticipants = chatData.participants.map(participant => {
+                    if (typeof participant === 'object' && participant.id) {
+                        return {
+                            id: participant.id._serialized || participant.id,
+                            isAdmin: participant.isAdmin || false,
+                            isSuperAdmin: participant.isSuperAdmin || false,
+                            number: participant.id.user || participant.number
+                        };
+                    }
+                    return participant;
+                });
+
+                participantsJson = JSON.stringify(formattedParticipants);
+                participantCount = formattedParticipants.length;
+            } else if (chatData.participantCount) {
+                participantCount = chatData.participantCount;
+            }
 
             const queryText = `
-                INSERT INTO chats (user_id, chat_id, chat_name, chat_type, is_group, participant_count)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO chats (
+                    user_id, 
+                    chat_id, 
+                    chat_name, 
+                    chat_type, 
+                    is_group, 
+                    participant_count,
+                    participants,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON DUPLICATE KEY UPDATE 
                     chat_name = VALUES(chat_name),
                     chat_type = VALUES(chat_type),
                     is_group = VALUES(is_group),
                     participant_count = VALUES(participant_count),
+                    participants = VALUES(participants),
                     updated_at = CURRENT_TIMESTAMP
             `;
 
             await query(queryText, [
-                userId, chatId, chatName, chatType, isGroup, participantCount
+                userId,
+                chatData.chatId,
+                chatData.chatName || null,
+                chatData.chatType || 'individual',
+                chatData.isGroup || false,
+                participantCount,
+                participantsJson
             ]);
 
             // Fetch the created/updated record
             const selectQuery = 'SELECT * FROM chats WHERE user_id = ? AND chat_id = ?';
-            const result = await query(selectQuery, [userId, chatId]);
+            const result = await query(selectQuery, [userId, chatData.chatId]);
 
-            console.log(`[Chat.create] Chat created/updated: ${chatName}`);
+            console.log(`[Chat] Chat created/updated for user ${userId}`);
             return result.rows[0];
+
         } catch (error) {
-            console.error(`[Chat.create] Database error for chat ${chatData.chatName}:`, error);
+            console.error(`[Chat] Error creating chat for user ${userId}:`, error);
             throw error;
         }
     }
@@ -64,7 +98,7 @@ class Chat {
             throw error;
         }
     }
-
+    
     static async findById(chatId, userId) {
         try {
             const queryText = 'SELECT * FROM chats WHERE id = ? AND user_id = ?';
@@ -76,26 +110,68 @@ class Chat {
         }
     }
 
-    static async updateLastMessageTime(chatId, timestamp) {
+    static async updateParticipants(chatId, participants) {
         try {
+            console.log(`[Chat] Updating participants for chat ${chatId}`);
+
+            // Format participants for JSON storage
+            const formattedParticipants = participants.map(participant => {
+                if (typeof participant === 'object' && participant.id) {
+                    return {
+                        id: participant.id._serialized || participant.id,
+                        isAdmin: participant.isAdmin || false,
+                        isSuperAdmin: participant.isSuperAdmin || false,
+                        number: participant.id.user || participant.number,
+                        pushname: participant.pushname || null,
+                        shortName: participant.shortName || null
+                    };
+                }
+                return participant;
+            });
+
+            const participantsJson = JSON.stringify(formattedParticipants);
+
             const queryText = `
                 UPDATE chats 
-                SET last_message_time = FROM_UNIXTIME(? / 1000), updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                SET participants = ?, 
+                    participant_count = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE chat_id = ?
             `;
-            await query(queryText, [timestamp, chatId]);
+
+            await query(queryText, [participantsJson, formattedParticipants.length, chatId]);
+
+            console.log(`[Chat] Participants updated for chat ${chatId}`);
+            return { success: true };
+
         } catch (error) {
-            console.error(`[Chat.updateLastMessageTime] Database error:`, error);
+            console.error(`[Chat] Error updating participants:`, error);
             throw error;
         }
     }
 
-    static async deleteByUserId(userId) {
+    static async updateLastMessageTime(chatId, timestamp) {
         try {
-            const queryText = 'DELETE FROM chats WHERE user_id = ?';
-            await query(queryText, [userId]);
+            const queryText = `
+                UPDATE chats 
+                SET last_message_time = FROM_UNIXTIME(?), 
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `;
+            await query(queryText, [Math.floor(timestamp / 1000), chatId]);
         } catch (error) {
-            console.error(`[Chat.deleteByUserId] Database error:`, error);
+            console.error(`[Chat] Error updating last message time:`, error);
+            throw error;
+        }
+    }
+
+    static async delete(userId, chatId) {
+        try {
+            const queryText = 'DELETE FROM chats WHERE user_id = ? AND chat_id = ?';
+            const result = await query(queryText, [userId, chatId]);
+            return result.affectedRows > 0;
+        } catch (error) {
+            console.error(`[Chat] Error deleting chat:`, error);
             throw error;
         }
     }
