@@ -550,7 +550,7 @@ class WhatsAppService {
                         // Continue with empty messages array
                         messages = [];
                     }
-
+                    
                     // Format and save messages if any exist
                     if (messages.length > 0) {
                         try {
@@ -561,7 +561,7 @@ class WhatsAppService {
                             await Message.bulkCreate(userId, chatRecord.id, formattedMessages);
 
                             // Update last message time
-                            const lastMessage = messages[0];
+                            const lastMessage = messages[messages.length-1].timestamp;
                             if (lastMessage) {
                                 await Chat.updateLastMessageTime(chatRecord.id, lastMessage.timestamp * 1000);
                             }
