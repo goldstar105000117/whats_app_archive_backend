@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS chats (
     is_group BOOLEAN DEFAULT false,
     participant_count INT DEFAULT 0,
     participants JSON NULL,
-    last_message_time TIMESTAMP NULL,
+    last_message_time BIGINT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,

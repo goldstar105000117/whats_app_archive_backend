@@ -561,9 +561,9 @@ class WhatsAppService {
                             await Message.bulkCreate(userId, chatRecord.id, formattedMessages);
 
                             // Update last message time
-                            const lastMessage = messages[messages.length-1].timestamp;
+                            const lastMessage = messages[messages.length-1];
                             if (lastMessage) {
-                                await Chat.updateLastMessageTime(chatRecord.id, lastMessage.timestamp * 1000);
+                                await Chat.updateLastMessageTime(chatRecord.id, lastMessage.timestamp);
                             }
 
                             totalMessages += formattedMessages.length;
@@ -677,7 +677,7 @@ class WhatsAppService {
             await Message.create(userId, chatRecord.id, formattedMessage);
 
             // Update last message time
-            await Chat.updateLastMessageTime(chatRecord.id, message.timestamp * 1000);
+            await Chat.updateLastMessageTime(chatRecord.id, message.timestamp);
 
         } catch (error) {
             console.error(`[saveMessage] Error saving message for user ${userId}:`, error);

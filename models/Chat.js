@@ -154,11 +154,11 @@ class Chat {
         try {
             const queryText = `
                 UPDATE chats 
-                SET last_message_time = FROM_UNIXTIME(?), 
+                SET last_message_time = ?, 
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             `;
-            await query(queryText, [Math.floor(timestamp / 1000), chatId]);
+            await query(queryText, [timestamp * 1000, chatId]);
         } catch (error) {
             console.error(`[Chat] Error updating last message time:`, error);
             throw error;

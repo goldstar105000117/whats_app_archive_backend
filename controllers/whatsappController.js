@@ -176,7 +176,7 @@ const fetchMessages = async (req, res) => {
         if (!res.headersSent) {
             res.status(408).json({ error: 'Message fetch timeout' });
         }
-    }, 10000);
+    }, 15000);
 
     try {
         const userId = req.user.id;
@@ -195,7 +195,7 @@ const fetchMessages = async (req, res) => {
         } else if (limit) {
             messageLimit = parseInt(limit);
         } else {
-            messageLimit = 100; // Much smaller default limit
+            messageLimit = 9999;
         }
 
         console.log(`[fetchMessages] Starting fetch for user ${userId} with limit: ${messageLimit || 'unlimited'}`);
