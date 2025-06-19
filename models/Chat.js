@@ -158,7 +158,7 @@ class Chat {
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             `;
-            await query(queryText, [timestamp * 1000, chatId]);
+            await query(queryText, [timestamp, chatId]);
         } catch (error) {
             console.error(`[Chat] Error updating last message time:`, error);
             throw error;
