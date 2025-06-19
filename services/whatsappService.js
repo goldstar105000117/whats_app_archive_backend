@@ -571,7 +571,7 @@ class WhatsAppService {
                             await Message.bulkCreate(userId, chatRecord.id, formattedMessages);
 
                             // Update last message time
-                            const lastMessage = messages[messages.length-1];
+                            const lastMessage = formattedMessages[formattedMessages.length-1];
                             if (lastMessage) {
                                 await Chat.updateLastMessageTime(chatRecord.id, lastMessage.timestamp);
                             }
