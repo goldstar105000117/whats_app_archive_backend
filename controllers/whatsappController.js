@@ -176,7 +176,7 @@ const fetchMessages = async (req, res) => {
         if (!res.headersSent) {
             res.status(408).json({ error: 'Message fetch timeout' });
         }
-    }, 15000);
+    }, 40000);
 
     try {
         const userId = req.user.id;
