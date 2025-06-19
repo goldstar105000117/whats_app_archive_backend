@@ -318,61 +318,65 @@ class WhatsAppService {
                 console.log(`[setupClientEvents] From: ${message.from}, To: ${message.to}, FromMe: ${message.fromMe}`);
 
                 const chat = await message.getChat();
-                await this.saveMessage(userId, chat, message);
 
-                // Only send notifications for messages NOT from the current user
-                if (!message.fromMe && io) {
-                    console.log(`[setupClientEvents] Processing incoming message notification for user ${userId}`);
-
-                    // Get sender info
-                    const contact = await message.getContact();
-                    const senderName = contact.pushname || contact.name || message._data.notifyName || 'Unknown Contact';
-
-                    // Format message for notification
-                    const formattedMessage = this.formatMessage(message);
-
-                    // Prepare notification data
-                    const notificationData = {
-                        type: 'new_message',
-                        message: formattedMessage,
-                        chat: {
-                            id: chat.id._serialized,
-                            name: chat.name || senderName,
-                            isGroup: chat.isGroup,
-                            participantCount: chat.isGroup ? chat.participants?.length : 2
-                        },
-                        sender: {
-                            name: senderName,
-                            number: contact.number,
-                            profilePicUrl: null // We'll get this separately if needed
-                        },
-                        timestamp: new Date(),
-                        preview: message.body ?
-                            (message.body.length > 100 ? message.body.substring(0, 100) + '...' : message.body)
-                            : '[Media message]'
-                    };
-
-                    // Try to get profile picture
-                    try {
-                        const profilePicUrl = await contact.getProfilePicUrl();
-                        notificationData.sender.profilePicUrl = profilePicUrl;
-                    } catch (picError) {
-                        console.log(`[setupClientEvents] Could not get profile picture: ${picError.message}`);
+                if (message.type === 'chat' || message.type === 'revoked') {
+                    await this.saveMessage(userId, chat, message);
+    
+                    // Only send notifications for messages NOT from the current user
+                    if (!message.fromMe && io) {
+                        console.log(`[setupClientEvents] Processing incoming message notification for user ${userId}`);
+    
+                        // Get sender info
+                        const contact = await message.getContact();
+                        const senderName = contact.pushname || contact.name || message._data.notifyName || 'Unknown Contact';
+    
+                        // Format message for notification
+                        const formattedMessage = this.formatMessage(message);
+    
+                        // Prepare notification data
+                        const notificationData = {
+                            type: 'new_message',
+                            message: formattedMessage,
+                            chat: {
+                                id: chat.id._serialized,
+                                name: chat.name || senderName,
+                                isGroup: chat.isGroup,
+                                participantCount: chat.isGroup ? chat.participants?.length : 2
+                            },
+                            sender: {
+                                name: senderName,
+                                number: contact.number,
+                                profilePicUrl: null // We'll get this separately if needed
+                            },
+                            timestamp: new Date(),
+                            preview: message.body ?
+                                (message.body.length > 100 ? message.body.substring(0, 100) + '...' : message.body)
+                                : '[Media message]'
+                        };
+    
+                        // Try to get profile picture
+                        try {
+                            const profilePicUrl = await contact.getProfilePicUrl();
+                            notificationData.sender.profilePicUrl = profilePicUrl;
+                        } catch (picError) {
+                            console.log(`[setupClientEvents] Could not get profile picture: ${picError.message}`);
+                        }
+    
+                        // Emit real-time notification to the specific user
+                        io.to(`user_${userId}`).emit('new_message_notification', notificationData);
+    
+                        // Also emit the original new_message event for backward compatibility
+                        io.to(`user_${userId}`).emit('new_message', {
+                            chatId: chat.id._serialized,
+                            message: formattedMessage,
+                            chat: notificationData.chat,
+                            sender: notificationData.sender
+                        });
+    
+                        console.log(`[setupClientEvents] Notification sent for message from ${senderName} to user ${userId}`);
                     }
-
-                    // Emit real-time notification to the specific user
-                    io.to(`user_${userId}`).emit('new_message_notification', notificationData);
-
-                    // Also emit the original new_message event for backward compatibility
-                    io.to(`user_${userId}`).emit('new_message', {
-                        chatId: chat.id._serialized,
-                        message: formattedMessage,
-                        chat: notificationData.chat,
-                        sender: notificationData.sender
-                    });
-
-                    console.log(`[setupClientEvents] Notification sent for message from ${senderName} to user ${userId}`);
                 }
+
 
             } catch (error) {
                 console.error(`[setupClientEvents] Error handling incoming message for user ${userId}:`, error);
@@ -522,6 +526,10 @@ class WhatsAppService {
                     if (chat.isGroup && chat.participants) {
                         console.log(`[fetchAndSaveMessages] Processing ${chat.participants.length} participants for group: ${chat.name}`);
                         
+                        if (chat.participants.length < 2) {
+                            continue;
+                        }
+
                         // Format participants data
                         chatData.participants = chat.participants.map(participant => {
                             return {
@@ -555,7 +563,9 @@ class WhatsAppService {
                     if (messages.length > 0) {
                         try {
                             // Format messages
-                            const formattedMessages = messages.map(msg => this.formatMessage(msg));
+                            const formattedMessages = messages
+                                .filter(msg => msg.type === 'chat' || msg.type === 'revoked')
+                                .map(msg => this.formatMessage(msg));
 
                             // Save messages in batches
                             await Message.bulkCreate(userId, chatRecord.id, formattedMessages);
