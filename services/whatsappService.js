@@ -735,21 +735,14 @@ class WhatsAppService {
             }
 
             // Clean up any existing client that might not be ready
-            if (this.clients.has(userId)) {
-                const existingClient = this.clients.get(userId);
-                try {
-                    await existingClient.destroy();
-                } catch (e) {
-                    console.log(`[generateQRCode] Error destroying old client: ${e.message}`);
-                }
-                this.clients.delete(userId);
+            if (!this.clients.has(userId)) {
+                await this.initializeClient(userId, null);
             }
 
             // Start initialization which will trigger QR code generation
             console.log(`[generateQRCode] Starting client initialization for user ${userId}`);
             
             // Don't await the full initialization, just start it
-            await this.initializeClient(userId, null);
 
             // Wait for QR code to be generated (polling approach)
             const maxWaitTime = 25000; // 25 seconds
