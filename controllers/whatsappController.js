@@ -21,12 +21,13 @@ const checkSession = async (req, res) => {
 
     try {
         const userId = req.user.id;
-        const io = req.app.get('io');
+        // SOCKET LOGIC DISABLED - const io = req.app.get('io');
 
-        if (!io) {
-            console.error('[checkSession] Socket.IO not available');
-            return res.status(500).json({ error: 'WebSocket server not available' });
-        }
+        // SOCKET LOGIC DISABLED - Check if Socket.IO is available
+        // if (!io) {
+        //     console.error('[checkSession] Socket.IO not available');
+        //     return res.status(500).json({ error: 'WebSocket server not available' });
+        // }
 
         if (!userId) {
             clearTimeout(timeout);
@@ -56,7 +57,9 @@ const checkSession = async (req, res) => {
         //     setTimeout(() => reject(new Error('DB timeout')), 2000)
         // );
 
-        const sessionStatus = await whatsappService.checkExistingSession(userId, io);
+        // SOCKET LOGIC DISABLED - Pass null instead of io
+        // const sessionStatus = await whatsappService.checkExistingSession(userId, io);
+        const sessionStatus = await whatsappService.checkExistingSession(userId, null);
 
         // const sessionData = await Promise.race([dbPromise, dbTimeout]);
         
@@ -104,25 +107,26 @@ const initializeWhatsApp = async (req, res) => {
     console.log(`[initializeWhatsApp] EMERGENCY FIX - Starting for user ${req.user.id}`);
     
     // Immediate response timeout
-    const timeout = setTimeout(() => {
-        if (!res.headersSent) {
-            console.error(`[initializeWhatsApp] TIMEOUT - Force responding for user ${req.user.id}`);
-            res.status(408).json({ error: 'Initialization timeout' });
-        }
-    }, 15000);
+    // const timeout = setTimeout(() => {
+    //     if (!res.headersSent) {
+    //         console.error(`[initializeWhatsApp] TIMEOUT - Force responding for user ${req.user.id}`);
+    //         res.status(408).json({ error: 'Initialization timeout' });
+    //     }
+    // }, 15000);
 
     try {
         const userId = req.user.id;
-        const io = req.app.get('io');
+        // SOCKET LOGIC DISABLED - const io = req.app.get('io');
 
-        if (!io) {
-            clearTimeout(timeout);
-            return res.status(500).json({ error: 'WebSocket server not available' });
-        }
+        // SOCKET LOGIC DISABLED - Check if Socket.IO is available
+        // if (!io) {
+        //     clearTimeout(timeout);
+        //     return res.status(500).json({ error: 'WebSocket server not available' });
+        // }
 
         // Quick check if already connected
         if (whatsappService.isClientReady(userId)) {
-            clearTimeout(timeout);
+            // clearTimeout(timeout);
             return res.json({
                 message: 'Client already connected',
                 status: 'connected',
@@ -132,41 +136,73 @@ const initializeWhatsApp = async (req, res) => {
 
         // Start initialization but don't wait for completion
         console.log(`[initializeWhatsApp] Starting background initialization for user ${userId}`);
-        whatsappService.initializeClient(userId, io).catch(error => {
-            console.error(`[initializeWhatsApp] Background initialization failed for user ${userId}:`, error);
-        });
+        
+        // SOCKET LOGIC DISABLED - Pass null instead of io
+        // whatsappService.initializeClient(userId, io).catch(error => {
+        const result = await whatsappService.initializeClient(userId, null);
 
+        console.log(`Done: initiallize`)
         // Respond immediately that we started the process
-        clearTimeout(timeout);
-        res.json({
+        // clearTimeout(timeout);
+        return res.json({
             message: 'WhatsApp initialization started',
             status: 'initializing',
             connected: false
         });
 
     } catch (error) {
-        clearTimeout(timeout);
+        // clearTimeout(timeout);
         console.error('[initializeWhatsApp] EMERGENCY ERROR:', error);
         
-        if (!res.headersSent) {
-            res.status(500).json({ error: 'Failed to start initialization' });
-        }
+        return res.status(500).json({ error: 'Failed to start initialization' });
     }
 };
 
 const getQRCode = async (req, res) => {
+    console.log(`[getQRCode] Generating QR code for user ${req.user.id}`);
+    
+    // Set timeout to prevent hanging
+    // const timeout = setTimeout(() => {
+    //     console.error(`[getQRCode] TIMEOUT - Force responding for user ${req.user.id}`);
+    //     return res.status(400).json({ error: 'QR code generation timeout' });
+    // }, 30000);
+
     try {
         const userId = req.user.id;
-        const qrCode = whatsappService.getQRCode(userId);
 
-        if (qrCode) {
-            res.json({ qr: qrCode });
-        } else {
-            res.status(404).json({ error: 'QR code not available' });
+        // Check if client already exists and is connected
+        if (whatsappService.isClientReady(userId)) {
+            clearTimeout(timeout);
+            return res.status(400).json({ 
+                error: 'WhatsApp client already connected. Please disconnect first to generate new QR code.',
+                connected: true
+            });
         }
+
+        // Try to generate QR code
+        const result = await whatsappService.generateQRCode(userId);
+        
+        // clearTimeout(timeout);
+
+        if (result.success) {
+            return res.json({ 
+                qr: result.qr,
+                message: result.message || 'QR code generated successfully. Scan to connect WhatsApp.'
+            });
+        } else {
+            return res.status(400).json({ 
+                error: result.error || 'Failed to generate QR code'
+            });
+        }
+
     } catch (error) {
+        // clearTimeout(timeout);
         console.error('[getQRCode] Error:', error);
-        res.status(500).json({ error: 'Failed to get QR code' });
+        
+        return res.status(500).json({ 
+            error: 'Failed to generate QR code',
+            details: error.message 
+        });
     }
 };
 

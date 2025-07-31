@@ -16,10 +16,10 @@ class WhatsAppService {
             console.log(`[initializeClient] Starting initialization for user ${userId}`);
 
             // Check if initialization is already in progress
-            if (this.initializationPromises.has(userId)) {
-                console.log(`[initializeClient] Initialization already in progress for user ${userId}`);
-                return await this.initializationPromises.get(userId);
-            }
+            // if (this.initializationPromises.has(userId)) {
+            //     console.log(`[initializeClient] Initialization already in progress for user ${userId}`);
+            //     return await this.initializationPromises.get(userId);
+            // }
 
             // Check if client already exists and is connected
             if (this.clients.has(userId)) {
@@ -40,16 +40,18 @@ class WhatsAppService {
             }
 
             // Create initialization promise
-            const initPromise = this._performInitialization(userId, io);
-            this.initializationPromises.set(userId, initPromise);
+            // const initPromise = await this._performInitialization(userId, io);
+            // this.initializationPromises.set(userId, initPromise);
 
-            try {
-                const result = await initPromise;
-                return result;
-            } finally {
-                // Clean up the promise tracker
-                this.initializationPromises.delete(userId);
-            }
+            // try {
+            const result = await this._performInitialization(userId, io);
+            console.log('delete', result)
+            return result;
+            // } finally {
+            //     // Clean up the promise tracker
+            //     console.log('delete')
+            //     this.initializationPromises.delete(userId);
+            // }
 
         } catch (error) {
             console.error(`[initializeClient] Error initializing client for user ${userId}:`, error);
@@ -92,32 +94,40 @@ class WhatsAppService {
             console.log(`[_performInitialization] Starting client.initialize() for user ${userId}`);
 
             // Create a promise that resolves when client is ready or rejects on timeout
-            const initializationResult = await Promise.race([
-                new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => {
-                        reject(new Error('Client initialization timed out'));
-                    }, 50000);
+            // const initializationResult = await Promise.race([
+            //     new Promise((resolve, reject) => {
+            //         const timeout = setTimeout(() => {
+            //             cleanup();
+            //             reject(new Error('Initialization timeout'));
+            //         }, 30000);
 
-                    // Listen for ready or auth_failure events
-                    client.once('ready', () => {
-                        clearTimeout(timeout);
-                        resolve({ success: true, message: 'Client connected', connected: true });
-                    });
+            //         const cleanup = () => {
+            //             clearTimeout(timeout);
+            //             client.removeAllListeners('ready');
+            //             client.removeAllListeners('auth_failure');
+            //         };
 
-                    client.once('auth_failure', (msg) => {
-                        clearTimeout(timeout);
-                        resolve({ success: false, error: `Authentication failed: ${msg}` });
-                    });
+            //         client.once('ready', () => {
+            //             cleanup();
+            //             resolve({ success: true, message: 'Client connected', connected: true });
+            //         });
 
-                    // Start initialization
-                    client.initialize().catch((err) => {
-                        clearTimeout(timeout);
-                        reject(err);
-                    });
-                })
-            ]);
+            //         client.once('auth_failure', (msg) => {
+            //             cleanup();
+            //             resolve({ success: false, error: `Authentication failed: ${msg}` });
+            //         });
 
-            return initializationResult;
+            //         client.initialize().catch((err) => {
+            //             cleanup();
+            //             reject(err);
+            //         });
+            //     })
+            // ]);
+
+            // console.log(initializationResult)
+
+            // return initializationResult;
+            return {};
 
         } catch (error) {
             console.error(`[_performInitialization] Error during initialization for user ${userId}:`, error);
@@ -148,10 +158,10 @@ class WhatsAppService {
                 // Store QR code
                 this.qrCodes.set(userId, qrDataURL);
 
-                // Emit to specific user
-                if (io) {
-                    io.to(`user_${userId}`).emit('qr', { qr: qrDataURL });
-                }
+                // SOCKET LOGIC DISABLED - Emit to specific user
+                // if (io) {
+                //     io.to(`user_${userId}`).emit('qr', { qr: qrDataURL });
+                // }
 
                 // Create or update session record (not active yet)
                 await WhatsAppSession.create(userId);
@@ -167,14 +177,14 @@ class WhatsAppService {
                 const clientInfo = client.info;
                 console.log(`[setupClientEvents] Connected as: ${clientInfo.pushname} (${clientInfo.wid.user})`);
 
-                // IMMEDIATE: Emit ready event to frontend first (don't wait for database)
-                if (io) {
-                    io.to(`user_${userId}`).emit('ready', {
-                        phoneNumber: clientInfo.wid.user,
-                        pushName: clientInfo.pushname
-                    });
-                    console.log(`[setupClientEvents] Ready event emitted to frontend for user ${userId}`);
-                }
+                // SOCKET LOGIC DISABLED - IMMEDIATE: Emit ready event to frontend first (don't wait for database)
+                // if (io) {
+                //     io.to(`user_${userId}`).emit('ready', {
+                //         phoneNumber: clientInfo.wid.user,
+                //         pushName: clientInfo.pushname
+                //     });
+                //     console.log(`[setupClientEvents] Ready event emitted to frontend for user ${userId}`);
+                // }
 
                 // IMMEDIATE: Remove QR code since connection is successful
                 this.qrCodes.delete(userId);
@@ -235,39 +245,39 @@ class WhatsAppService {
                             }
                         });
 
-                        // Emit database update completion (optional)
-                        if (io) {
-                            io.to(`user_${userId}`).emit('session_saved', {
-                                success: true,
-                                phoneNumber: clientInfo.wid.user
-                            });
-                        }
+                        // SOCKET LOGIC DISABLED - Emit database update completion (optional)
+                        // if (io) {
+                        //     io.to(`user_${userId}`).emit('session_saved', {
+                        //         success: true,
+                        //         phoneNumber: clientInfo.wid.user
+                        //     });
+                        // }
 
                     } catch (backgroundError) {
                         console.error(`[setupClientEvents] Background database operations failed for user ${userId}:`, backgroundError.message);
 
-                        // Even if database fails, client is still connected
-                        if (io) {
-                            io.to(`user_${userId}`).emit('session_saved', {
-                                success: false,
-                                error: 'Database update failed but client is connected',
-                                phoneNumber: clientInfo.wid.user
-                            });
-                        }
+                        // SOCKET LOGIC DISABLED - Even if database fails, client is still connected
+                        // if (io) {
+                        //     io.to(`user_${userId}`).emit('session_saved', {
+                        //         success: false,
+                        //         error: 'Database update failed but client is connected',
+                        //         phoneNumber: clientInfo.wid.user
+                        //     });
+                        // }
                     }
                 });
 
             } catch (error) {
                 console.error(`[setupClientEvents] Critical error in ready event for user ${userId}:`, error);
 
-                // Even on error, try to emit ready event
-                if (io) {
-                    io.to(`user_${userId}`).emit('ready', {
-                        phoneNumber: 'unknown',
-                        pushName: 'unknown',
-                        error: 'Partial connection - some features may not work'
-                    });
-                }
+                // SOCKET LOGIC DISABLED - Even on error, try to emit ready event
+                // if (io) {
+                //     io.to(`user_${userId}`).emit('ready', {
+                //         phoneNumber: 'unknown',
+                //         pushName: 'unknown',
+                //         error: 'Partial connection - some features may not work'
+                //     });
+                // }
             }
         });
 
@@ -278,9 +288,10 @@ class WhatsAppService {
                 // Save the session data to database
                 await WhatsAppSession.updateSessionData(userId, JSON.stringify(session));
 
-                if (io) {
-                    io.to(`user_${userId}`).emit('authenticated');
-                }
+                // SOCKET LOGIC DISABLED
+                // if (io) {
+                //     io.to(`user_${userId}`).emit('authenticated');
+                // }
             } catch (error) {
                 console.error(`[setupClientEvents] Error saving session data for user ${userId}:`, error);
             }
@@ -290,9 +301,10 @@ class WhatsAppService {
             console.error(`[setupClientEvents] Authentication failed for user ${userId}:`, msg);
             try {
                 await WhatsAppSession.setActive(userId, false);
-                if (io) {
-                    io.to(`user_${userId}`).emit('auth_failure', { message: msg });
-                }
+                // SOCKET LOGIC DISABLED
+                // if (io) {
+                //     io.to(`user_${userId}`).emit('auth_failure', { message: msg });
+                // }
             } catch (error) {
                 console.error(`[setupClientEvents] Error handling auth_failure for user ${userId}:`, error);
             }
@@ -303,9 +315,10 @@ class WhatsAppService {
             try {
                 await WhatsAppSession.setActive(userId, false);
                 this.clients.delete(userId);
-                if (io) {
-                    io.to(`user_${userId}`).emit('disconnected', { reason });
-                }
+                // SOCKET LOGIC DISABLED
+                // if (io) {
+                //     io.to(`user_${userId}`).emit('disconnected', { reason });
+                // }
             } catch (error) {
                 console.error(`[setupClientEvents] Error handling disconnection for user ${userId}:`, error);
             }
@@ -322,59 +335,59 @@ class WhatsAppService {
                 if (message.type === 'chat' || message.type === 'revoked') {
                     await this.saveMessage(userId, chat, message);
     
-                    // Only send notifications for messages NOT from the current user
-                    if (!message.fromMe && io) {
-                        console.log(`[setupClientEvents] Processing incoming message notification for user ${userId}`);
+                    // SOCKET LOGIC DISABLED - Only send notifications for messages NOT from the current user
+                    // if (!message.fromMe && io) {
+                    //     console.log(`[setupClientEvents] Processing incoming message notification for user ${userId}`);
     
-                        // Get sender info
-                        const contact = await message.getContact();
-                        const senderName = contact.pushname || contact.name || message._data.notifyName || 'Unknown Contact';
+                    //     // Get sender info
+                    //     const contact = await message.getContact();
+                    //     const senderName = contact.pushname || contact.name || message._data.notifyName || 'Unknown Contact';
     
-                        // Format message for notification
-                        const formattedMessage = this.formatMessage(message);
+                    //     // Format message for notification
+                    //     const formattedMessage = this.formatMessage(message);
     
-                        // Prepare notification data
-                        const notificationData = {
-                            type: 'new_message',
-                            message: formattedMessage,
-                            chat: {
-                                id: chat.id._serialized,
-                                name: chat.name || senderName,
-                                isGroup: chat.isGroup,
-                                participantCount: chat.isGroup ? chat.participants?.length : 2
-                            },
-                            sender: {
-                                name: senderName,
-                                number: contact.number,
-                                profilePicUrl: null // We'll get this separately if needed
-                            },
-                            timestamp: new Date(),
-                            preview: message.body ?
-                                (message.body.length > 100 ? message.body.substring(0, 100) + '...' : message.body)
-                                : '[Media message]'
-                        };
+                    //     // Prepare notification data
+                    //     const notificationData = {
+                    //         type: 'new_message',
+                    //         message: formattedMessage,
+                    //         chat: {
+                    //             id: chat.id._serialized,
+                    //             name: chat.name || senderName,
+                    //             isGroup: chat.isGroup,
+                    //             participantCount: chat.isGroup ? chat.participants?.length : 2
+                    //         },
+                    //         sender: {
+                    //             name: senderName,
+                    //             number: contact.number,
+                    //             profilePicUrl: null // We'll get this separately if needed
+                    //         },
+                    //         timestamp: new Date(),
+                    //         preview: message.body ?
+                    //             (message.body.length > 100 ? message.body.substring(0, 100) + '...' : message.body)
+                    //             : '[Media message]'
+                    //     };
     
-                        // Try to get profile picture
-                        try {
-                            const profilePicUrl = await contact.getProfilePicUrl();
-                            notificationData.sender.profilePicUrl = profilePicUrl;
-                        } catch (picError) {
-                            console.log(`[setupClientEvents] Could not get profile picture: ${picError.message}`);
-                        }
+                    //     // Try to get profile picture
+                    //     try {
+                    //         const profilePicUrl = await contact.getProfilePicUrl();
+                    //         notificationData.sender.profilePicUrl = profilePicUrl;
+                    //     } catch (picError) {
+                    //         console.log(`[setupClientEvents] Could not get profile picture: ${picError.message}`);
+                    //     }
     
-                        // Emit real-time notification to the specific user
-                        io.to(`user_${userId}`).emit('new_message_notification', notificationData);
+                    //     // Emit real-time notification to the specific user
+                    //     io.to(`user_${userId}`).emit('new_message_notification', notificationData);
     
-                        // Also emit the original new_message event for backward compatibility
-                        io.to(`user_${userId}`).emit('new_message', {
-                            chatId: chat.id._serialized,
-                            message: formattedMessage,
-                            chat: notificationData.chat,
-                            sender: notificationData.sender
-                        });
+                    //     // Also emit the original new_message event for backward compatibility
+                    //     io.to(`user_${userId}`).emit('new_message', {
+                    //         chatId: chat.id._serialized,
+                    //         message: formattedMessage,
+                    //         chat: notificationData.chat,
+                    //         sender: notificationData.sender
+                    //     });
     
-                        console.log(`[setupClientEvents] Notification sent for message from ${senderName} to user ${userId}`);
-                    }
+                    //     console.log(`[setupClientEvents] Notification sent for message from ${senderName} to user ${userId}`);
+                    // }
                 }
 
 
@@ -696,6 +709,87 @@ class WhatsAppService {
 
     getQRCode(userId) {
         return this.qrCodes.get(userId);
+    }
+
+    // New method to generate QR code on demand
+    async generateQRCode(userId) {
+        try {
+            console.log(`[generateQRCode] Starting QR code generation for user ${userId}`);
+
+            // Check if client already exists and is connected
+            if (this.isClientReady(userId)) {
+                return {
+                    success: false,
+                    error: 'Client already connected'
+                };
+            }
+
+            // Check if QR code already exists
+            if (this.qrCodes.has(userId)) {
+                console.log(`[generateQRCode] QR code already exists for user ${userId}`);
+                return {
+                    success: true,
+                    qr: this.qrCodes.get(userId),
+                    message: 'QR code already available'
+                };
+            }
+
+            // Clean up any existing client that might not be ready
+            if (this.clients.has(userId)) {
+                const existingClient = this.clients.get(userId);
+                try {
+                    await existingClient.destroy();
+                } catch (e) {
+                    console.log(`[generateQRCode] Error destroying old client: ${e.message}`);
+                }
+                this.clients.delete(userId);
+            }
+
+            // Start initialization which will trigger QR code generation
+            console.log(`[generateQRCode] Starting client initialization for user ${userId}`);
+            
+            // Don't await the full initialization, just start it
+            await this.initializeClient(userId, null);
+
+            // Wait for QR code to be generated (polling approach)
+            const maxWaitTime = 25000; // 25 seconds
+            const pollInterval = 500; // 500ms
+            const startTime = Date.now();
+
+            while ((Date.now() - startTime) < maxWaitTime) {
+                if (this.qrCodes.has(userId)) {
+                    const qrCode = this.qrCodes.get(userId);
+                    console.log(`[generateQRCode] QR code generated successfully for user ${userId}`);
+                    return {
+                        success: true,
+                        qr: qrCode,
+                        message: 'QR code generated successfully'
+                    };
+                }
+
+                // Check if client became ready (already authenticated)
+                if (this.isClientReady(userId)) {
+                    console.log(`[generateQRCode] Client already authenticated for user ${userId}`);
+                    return {
+                        success: false,
+                        error: 'Client already authenticated - no QR code needed'
+                    };
+                }
+
+                await new Promise(resolve => setTimeout(resolve, pollInterval));
+            }
+
+            return {
+                success: false,
+                error: 'QR code generation timeout'
+            };
+        } catch (error) {
+            console.error(`[generateQRCode] Error generating QR code for user ${userId}:`, error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
     }
 
     isClientReady(userId) {
