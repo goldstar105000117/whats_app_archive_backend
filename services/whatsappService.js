@@ -94,40 +94,39 @@ class WhatsAppService {
             console.log(`[_performInitialization] Starting client.initialize() for user ${userId}`);
 
             // Create a promise that resolves when client is ready or rejects on timeout
-            // const initializationResult = await Promise.race([
-            //     new Promise((resolve, reject) => {
-            //         const timeout = setTimeout(() => {
-            //             cleanup();
-            //             reject(new Error('Initialization timeout'));
-            //         }, 30000);
+            const initializationResult = await Promise.race([
+                new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        cleanup();
+                        reject(new Error('Initialization timeout'));
+                    }, 20000);
 
-            //         const cleanup = () => {
-            //             clearTimeout(timeout);
-            //             client.removeAllListeners('ready');
-            //             client.removeAllListeners('auth_failure');
-            //         };
+                    const cleanup = () => {
+                        clearTimeout(timeout);
+                        client.removeAllListeners('ready');
+                        client.removeAllListeners('auth_failure');
+                    };
 
-            //         client.once('ready', () => {
-            //             cleanup();
-            //             resolve({ success: true, message: 'Client connected', connected: true });
-            //         });
+                    client.once('ready', () => {
+                        cleanup();
+                        resolve({ success: true, message: 'Client connected', connected: true });
+                    });
 
-            //         client.once('auth_failure', (msg) => {
-            //             cleanup();
-            //             resolve({ success: false, error: `Authentication failed: ${msg}` });
-            //         });
+                    client.once('auth_failure', (msg) => {
+                        cleanup();
+                        resolve({ success: false, error: `Authentication failed: ${msg}` });
+                    });
 
-            //         client.initialize().catch((err) => {
-            //             cleanup();
-            //             reject(err);
-            //         });
-            //     })
-            // ]);
+                    client.initialize().catch((err) => {
+                        cleanup();
+                        reject(err);
+                    });
+                })
+            ]);
 
-            // console.log(initializationResult)
+            console.log(initializationResult)
 
-            // return initializationResult;
-            return {};
+            return initializationResult;
 
         } catch (error) {
             console.error(`[_performInitialization] Error during initialization for user ${userId}:`, error);
@@ -148,6 +147,7 @@ class WhatsAppService {
     }
 
     setupClientEvents(client, userId, io) {
+        console.log('call setup')
         client.on('qr', async (qr) => {
             try {
                 console.log(`[setupClientEvents] QR Code generated for user ${userId}`);
