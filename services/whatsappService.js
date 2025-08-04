@@ -98,8 +98,8 @@ class WhatsAppService {
                 new Promise((resolve, reject) => {
                     const timeout = setTimeout(() => {
                         cleanup();
-                        reject(new Error('Initialization timeout'));
-                    }, 20000);
+                        reject({ success: false, error: 'Initialization timeout' });
+                    }, 5000);
 
                     const cleanup = () => {
                         clearTimeout(timeout);
@@ -119,7 +119,7 @@ class WhatsAppService {
 
                     client.initialize().catch((err) => {
                         cleanup();
-                        reject(err);
+                        reject({ success: false, error: err });
                     });
                 })
             ]);
@@ -753,7 +753,7 @@ class WhatsAppService {
             // Don't await the full initialization, just start it
 
             // Wait for QR code to be generated (polling approach)
-            const maxWaitTime = 25000; // 25 seconds
+            const maxWaitTime = 30000; // 35 seconds
             const pollInterval = 500; // 500ms
             const startTime = Date.now();
 
