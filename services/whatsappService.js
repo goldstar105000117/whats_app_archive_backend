@@ -99,7 +99,7 @@ class WhatsAppService {
                     const timeout = setTimeout(() => {
                         cleanup();
                         reject({ success: false, error: 'Initialization timeout' });
-                    }, 5000);
+                    }, 10000);
 
                     const cleanup = () => {
                         clearTimeout(timeout);
