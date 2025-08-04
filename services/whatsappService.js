@@ -726,12 +726,20 @@ class WhatsAppService {
 
             // Check if QR code already exists
             if (this.qrCodes.has(userId)) {
-                console.log(`[generateQRCode] QR code already exists for user ${userId}`);
-                return {
-                    success: true,
-                    qr: this.qrCodes.get(userId),
-                    message: 'QR code already available'
-                };
+                const existingClient = this.clients.get(userId);
+                try {
+                    await existingClient.destroy();
+                } catch (e) {
+                    console.log(`[generateQRCode] Error destroying old client: ${e.message}`);
+                }
+                this.clients.delete(userId);
+                this.qrCodes.delete(userId);
+                // console.log(`[generateQRCode] QR code already exists for user ${userId}`);
+                // return {
+                //     success: true,
+                //     qr: this.qrCodes.get(userId),
+                //     message: 'QR code already available'
+                // };
             }
 
             // Clean up any existing client that might not be ready
