@@ -744,7 +744,7 @@ class WhatsAppService {
 
             // Clean up any existing client that might not be ready
             if (!this.clients.has(userId)) {
-                await this.initializeClient(userId, null);
+                this.initializeClient(userId, null);
             }
 
             // Start initialization which will trigger QR code generation
